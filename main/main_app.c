@@ -18,7 +18,7 @@
 //#include "ili9341/fonts/font.c"
 #include "esp_system.h"
 #include "esp_spi_flash.h"
-#include "esp32/spiram.h"
+#include "esp_psram.h"
 #include "ili9341/ili9341.h"
 //#include "ili9341/ili9341.c"
 #include "esp32/himem.h"

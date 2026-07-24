@@ -279,5 +279,7 @@ uint8_t *font_GetFontStruct(uint8_t FontID, uint8_t Char);
 uint8_t font_GetCharWidth(uint8_t *pCharTable);
 // The function returns the height of the symbol
 uint8_t font_GetCharHeight(uint8_t *pCharTable);
+//The function fills the requested metrics for a glyph and returns 0 when unavailable
+uint8_t font_GetCharMetrics(uint8_t FontID, uint8_t Char, uint8_t *pWidth, uint8_t *pHeight);
 
 #endif

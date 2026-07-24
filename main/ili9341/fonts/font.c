@@ -18,6 +18,9 @@ const t_font_getchar font_table_funcs[] =
 // The feature returns a pointer to the structure that describes the Char symbol
 uint8_t *font_GetFontStruct(uint8_t FontID, uint8_t Char)
 {
+  if (FontID >= (sizeof(font_table_funcs) / sizeof(font_table_funcs[0])))
+    return 0;
+
   return font_table_funcs[FontID](Char);
 }
 
@@ -40,4 +43,17 @@ uint8_t font_GetCharHeight(uint8_t *pCharTable)
 
 	pCharTable++;
 	return *pCharTable;  // Pointer to Height
+}
+
+
+uint8_t font_GetCharMetrics(uint8_t FontID, uint8_t Char, uint8_t *pWidth, uint8_t *pHeight)
+{
+  uint8_t *pCharTable = font_GetFontStruct(FontID, Char);
+
+  if (!pWidth || !pHeight || !pCharTable)
+    return 0;
+
+  *pWidth = font_GetCharWidth(pCharTable);
+  *pHeight = font_GetCharHeight(pCharTable);
+  return 1;
 }

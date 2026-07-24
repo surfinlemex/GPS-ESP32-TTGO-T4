@@ -19,7 +19,7 @@ static uint8_t ConsoleLine = 0;
 void console_pause(uint32_t timeMs)
 {
 //    dispcolor_Update();
-    vTaskDelay(timeMs / portTICK_RATE_MS);
+    vTaskDelay(pdMS_TO_TICKS(timeMs));
 }
 
 
@@ -64,8 +64,8 @@ void console_printf(eConsoleMsgType msgType, const char *args, ...)
 
 void FatalError()
 {
-	console_printf(MsgError, "Перезагрузка через 5 секунд...\r\n");
-	vTaskDelay(5000 / portTICK_RATE_MS);
+	console_printf(MsgError, "Fatal error...\r\n");
+	vTaskDelay(pdMS_TO_TICKS(5000));
 
     fflush(stdout);
     esp_restart();

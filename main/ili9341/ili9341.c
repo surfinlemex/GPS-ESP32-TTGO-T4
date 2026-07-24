@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+#include "freertos/include/task.h"
 #include "esp_system.h"
 #include "soc/gpio_struct.h"
 #include "driver/spi_master.h"
@@ -260,9 +260,9 @@ static void lcd_init()
 
     //Reset the display
     gpio_set_level(PIN_RST, 0);
-    vTaskDelay(100 / portTICK_RATE_MS);
+    vTaskDelay(pdMS_TO_TICKS(100));
     gpio_set_level(PIN_RST, 1);
-    vTaskDelay(100 / portTICK_RATE_MS);
+    vTaskDelay(pdMS_TO_TICKS(100));
 
     //printf("LCD ILI9341 initialization.\n");
     lcd_init_cmds = ili_init_cmds;
@@ -274,7 +274,7 @@ static void lcd_init()
         lcd_data(lcd_init_cmds[cmd].data, lcd_init_cmds[cmd].databytes & 0x1F);
 
         if (lcd_init_cmds[cmd].databytes & 0x80)
-            vTaskDelay(100 / portTICK_RATE_MS);
+            vTaskDelay(pdMS_TO_TICKS(100));
 
         cmd++;
     }
@@ -322,7 +322,7 @@ void ili9341_init(uint16_t width, uint16_t height)
   lcd_init();
 
   ScreenBuff = heap_caps_malloc(ILI9341_TFTHEIGHT * ILI9341_TFTWIDTH * 2, MALLOC_CAP_8BIT | MALLOC_CAP_DMA);
-  printf("*ScreenBuff=0x%08X\n", (uint32_t) ScreenBuff);
+  printf("*ScreenBuff=0x%08lx\n", (unsigned long) ScreenBuff);
 
   ili9341_setRotation(1);
 }
@@ -578,8 +578,11 @@ static uint8_t ili9341_DrawChar_General(int16_t X, int16_t Y, uint8_t FontID,
                                           uint16_t BgColor, uint8_t TransparentBg)
 {
   uint8_t *pCharTable = font_GetFontStruct(FontID, Char);
-  uint8_t CharWidth = font_GetCharWidth(pCharTable);    // ...... .......
-  uint8_t CharHeight = font_GetCharHeight(pCharTable);  // ...... .......
+  if (!pCharTable)
+    return 0;
+
+  uint8_t CharWidth = font_GetCharWidth(pCharTable);
+  uint8_t CharHeight = font_GetCharHeight(pCharTable);
   pCharTable += 2;
 
   if (FontID == FONTID_6X8M)
@@ -588,10 +591,15 @@ static uint8_t ili9341_DrawChar_General(int16_t X, int16_t Y, uint8_t FontID,
     {
       for (uint8_t col = 0; col < CharWidth; col++)
       {
-        if (pCharTable[row] & (1 << (7 - col)))
-          ili9341_DrawPixel(X + col, Y + row, TextColor);
+        int16_t pixelX = X + col;
+        int16_t pixelY = Y + row;
+        if ((pixelX < 0) || (pixelX >= _width) || (pixelY < 0) || (pixelY >= _height))
+          continue;
+
+        if (pCharTable[row] & (1u << (7 - col)))
+          ili9341_DrawPixel(pixelX, pixelY, TextColor);
         else if (!TransparentBg)
-          ili9341_DrawPixel(X + col, Y + row, BgColor);
+          ili9341_DrawPixel(pixelX, pixelY, BgColor);
       }
     }
   }
@@ -601,19 +609,24 @@ static uint8_t ili9341_DrawChar_General(int16_t X, int16_t Y, uint8_t FontID,
     {
       for (uint8_t col = 0; col < CharWidth; col++)
       {
+        int16_t pixelX = X + col;
+        int16_t pixelY = Y + row;
+        if ((pixelX < 0) || (pixelX >= _width) || (pixelY < 0) || (pixelY >= _height))
+          continue;
+
         if (col < 8)
         {
-          if (pCharTable[row * 2] & (1 << (7 - col)))
-            ili9341_DrawPixel(X + col, Y + row, TextColor);
+          if (pCharTable[row * 2] & (1u << (7 - col)))
+            ili9341_DrawPixel(pixelX, pixelY, TextColor);
           else if (!TransparentBg)
-            ili9341_DrawPixel(X + col, Y + row, BgColor);
+            ili9341_DrawPixel(pixelX, pixelY, BgColor);
         }
         else
         {
-          if (pCharTable[(row * 2) + 1] & (1 << (15 - col)))
-            ili9341_DrawPixel(X + col, Y + row, TextColor);
+          if (pCharTable[(row * 2) + 1] & (1u << (15 - col)))
+            ili9341_DrawPixel(pixelX, pixelY, TextColor);
           else if (!TransparentBg)
-            ili9341_DrawPixel(X + col, Y + row, BgColor);
+            ili9341_DrawPixel(pixelX, pixelY, BgColor);
         }
       }
     }
@@ -640,31 +653,41 @@ static int16_t ili9341_DrawString_General(int16_t X, int16_t Y, uint8_t FontID,
                                          uint8_t *Str, uint16_t TextColor,
                                          uint16_t BgColor, uint8_t TransparentBg)
 {
-  uint8_t done = 0;             // .... ......... ......
-  int16_t Xstart = X;           // .......... .... ..... .......... ....... ... ........ .. ..... ......
-  uint8_t StrHeight = 8;        // ...... ........ . ........ ... ........ .. ......... ......
+  uint8_t done = 0;
+  int16_t Xstart = X;
+  uint8_t StrHeight = 8;
 
-  // ..... ......
   while (!done)
   {
     switch (*Str)
     {
-    case '\0':  // ..... ......
+    case '\0':
       done = 1;
       break;
-    case '\n':  // ....... .. ......... ......
+    case '\n':
       Y += StrHeight;
       break;
-    case '\r':  // ....... . ...... ......
+    case '\r':
       X = Xstart;
       break;
-    default:    // ............ ......
-      if (TransparentBg)
-        X += ili9341_DrawChar(X, Y, FontID, *Str, TextColor);
-      else
-        X += ili9341_DrawChar_Bg(X, Y, FontID, *Str, TextColor, BgColor);
+    default:
+      {
+        uint8_t CharWidth = 0;
+        uint8_t CharHeight = 0;
+        if (font_GetCharMetrics(FontID, *Str, &CharWidth, &CharHeight))
+        {
+          if (TransparentBg)
+            X += ili9341_DrawChar(X, Y, FontID, *Str, TextColor);
+          else
+            X += ili9341_DrawChar_Bg(X, Y, FontID, *Str, TextColor, BgColor);
 
-      StrHeight = font_GetCharHeight(font_GetFontStruct(FontID, *Str));
+          StrHeight = CharHeight;
+        }
+        else
+        {
+          StrHeight = 8;
+        }
+      }
       break;
     }
     Str++;
@@ -711,28 +734,31 @@ int16_t ili9341_TextOutput_Bg(int16_t X, int16_t Y, uint8_t FontID, uint16_t Tex
 
 int16_t ili9341_getStrWidth(uint8_t FontID, char *Str)
 {
-	uint8_t done = 0;       // .... ......... ......
-	int16_t StrWidth = 0;  // ...... ...... . ........
+	uint8_t done = 0;
+	int16_t StrWidth = 0;
 
-// ..... ......
-while (!done)
-{
-	switch (*Str)
-    {
-    case '\0':  // ..... ......
-       done = 1;
-        break;
-    case '\n':  // ....... .. ......... ......
-    case '\r':  // ....... . ...... ......
-        break;
-    default:    // ............ ......
-        StrWidth += font_GetCharWidth(font_GetFontStruct(FontID, *Str));
-        break;
-    }
-	Str++;
-}
+	while (!done)
+	{
+		switch (*Str)
+		{
+		case '\0':
+			done = 1;
+			break;
+		case '\n':
+		case '\r':
+			break;
+		default:
+			{
+				uint8_t CharWidth = 0;
+				if (font_GetCharMetrics(FontID, *Str, &CharWidth, &(uint8_t){0}))
+					StrWidth += CharWidth;
+			}
+			break;
+		}
+		Str++;
+	}
 
-return StrWidth;
+	return StrWidth;
 }
 
 
