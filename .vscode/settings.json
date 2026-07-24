@@ -1,0 +1,10 @@
+{
+  "idf.espIdfPath": "/home/surfin/Projects/esp-idf",
+  "idf.pythonBinPath": "/home/surfin/.espressif/python_env/idf5.5_py3.14_env/bin/python",
+  "idf.toolsPath": "/home/surfin/.espressif",
+  "idf.openOcdConfigPath": "/home/surfin/.espressif/tools/openocd-esp32/v0.12.0-esp32-20260424/share/openocd/scripts",
+  "idf.flashType": "UART",
+  "idf.port": "",
+  "idf.enableCCache": false,
+  "idf.useIDFMonitor": true
+}
