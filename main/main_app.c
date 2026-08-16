@@ -95,15 +95,44 @@ void monitoring_task(void *pvParameter)
 void fetchButtontask(void * params)
 {
   struct sButtonStates ButtonStates;
+  memset(&ButtonStates, 1, sizeof(ButtonStates));  // Initialize to 1 (not pressed)
+  
   while (true)
   {
     ButtonStates.button1 = gpio_get_level(PIN_BUTTON1);
     ButtonStates.button2 = gpio_get_level(PIN_BUTTON2);
     ButtonStates.button3 = gpio_get_level(PIN_BUTTON3);
 
-    ESP_LOGI("TASK_1","waiting for button press %s\n", (char *) params);
-//    vTaskDelay(1000 / portTICK_PERIOD_MS);
-    vTaskDelay(10000 / portTICK_PERIOD_MS);
+    // Detect button1 press (falling edge: 1 -> 0)
+    if (ButtonStates.button1_old && !ButtonStates.button1)
+    {
+      ESP_LOGI("BUTTON", "Button 1 PRESSED!");
+      ili9341_FillRect(20, 100, 100, 30, YELLOW);
+      ili9341_TextOutput(30, 110, 0, BLACK, "Button 1");
+    }
+
+    // Detect button2 press (falling edge: 1 -> 0)
+    if (ButtonStates.button2_old && !ButtonStates.button2)
+    {
+      ESP_LOGI("BUTTON", "Button 2 PRESSED!");
+      ili9341_FillRect(150, 100, 100, 30, CYAN);
+      ili9341_TextOutput(160, 110, 0, BLACK, "Button 2");
+    }
+
+    // Detect button3 press (falling edge: 1 -> 0)
+    if (ButtonStates.button3_old && !ButtonStates.button3)
+    {
+      ESP_LOGI("BUTTON", "Button 3 PRESSED!");
+      ili9341_FillRect(280, 100, 100, 30, MAGENTA);
+      ili9341_TextOutput(290, 110, 0, BLACK, "Button 3");
+    }
+
+    // Update old states for next iteration
+    ButtonStates.button1_old = ButtonStates.button1;
+    ButtonStates.button2_old = ButtonStates.button2;
+    ButtonStates.button3_old = ButtonStates.button3;
+
+    vTaskDelay(pdMS_TO_TICKS(50));  // 50ms debounce delay
     if (uxTaskGetStackHighWaterMark(NULL) < 10)
        ESP_LOGW(TASK1_TAG,"Close to running out of stack space!\n");
   }
