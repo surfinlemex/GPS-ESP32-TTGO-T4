@@ -16,8 +16,10 @@
 #include "nvs_flash.h"
 #include "display.h"
 
-#define SSID "XeloX@MESH"
-#define PASSWORD "P@1@nTiR"  // WPA2 password (min 8 chars)
+#define SSID "XeloX@MESH"      // Router SSID to connect to
+#define PASSWORD "P@1@nTiR"  // Router WPA2 password (min 8 chars)
+
+#define WIFI_MAXIMUM_RETRY 5
 
 #define SW_VERSION_MAJOR	1
 #define SW_VERSION_MINOR	0
@@ -96,17 +98,24 @@ void buttons_init()
 	// gpio_pullup_en(PIN_BUTTON3);  // Not supported on this input-only pad
 }
 
+static int wifi_retry_count = 0;
+
 static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
-	if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STACONNECTED) {
-		wifi_event_ap_staconnected_t *event = (wifi_event_ap_staconnected_t *) event_data;
-		ESP_LOGI(TAG, "Station "MACSTR" joined, AID=%d", MAC2STR(event->mac), event->aid);
-	} else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STADISCONNECTED) {
-		wifi_event_ap_stadisconnected_t *event = (wifi_event_ap_stadisconnected_t *) event_data;
-		ESP_LOGI(TAG, "Station "MACSTR" left, AID=%d", MAC2STR(event->mac), event->aid);
-	} else if (event_base == IP_EVENT && event_id == IP_EVENT_AP_STAIPASSIGNED) {
-		ip_event_ap_staipassigned_t *event = (ip_event_ap_staipassigned_t *) event_data;
-		ESP_LOGI(TAG, "Assigned IP "IPSTR" to station "MACSTR, IP2STR(&event->ip), MAC2STR(event->mac));
+	if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+		esp_wifi_connect();
+	} else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+		if (wifi_retry_count < WIFI_MAXIMUM_RETRY) {
+			esp_wifi_connect();
+			wifi_retry_count++;
+			ESP_LOGI(TAG, "Retry connecting to AP (%d/%d)", wifi_retry_count, WIFI_MAXIMUM_RETRY);
+		} else {
+			ESP_LOGI(TAG, "Failed to connect to AP \"%s\"", SSID);
+		}
+	} else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+		ip_event_got_ip_t *event = (ip_event_got_ip_t *) event_data;
+		wifi_retry_count = 0;
+		ESP_LOGI(TAG, "Got IP: "IPSTR, IP2STR(&event->ip_info.ip));
 	}
 }
 
@@ -211,8 +220,8 @@ void app_main()
    printf("WiFi init\n");
    ESP_ERROR_CHECK(esp_netif_init());
    ESP_ERROR_CHECK(esp_event_loop_create_default());
-   // Default AP netif starts its own DHCP server on 192.168.4.1/24
-   esp_netif_t *ap_netif = esp_netif_create_default_wifi_ap();
+   // Default STA netif requests an IP from the router's DHCP server
+   esp_netif_create_default_wifi_sta();
 
    wifi_init_config_t wifiInitializationConfig = WIFI_INIT_CONFIG_DEFAULT();
  
@@ -220,36 +229,27 @@ void app_main()
    ESP_ERROR_CHECK(esp_wifi_init(&wifiInitializationConfig));
 
    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
-   ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_AP_STAIPASSIGNED, &wifi_event_handler, NULL, NULL));
+   ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, NULL));
  
    printf("WiFi mode\n");
-   ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+   ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
  
-   wifi_config_t ap_config = {
-          .ap = {
+   wifi_config_t sta_config = {
+          .sta = {
             .ssid = SSID,
-            .ssid_len = strlen(SSID),
             .password = PASSWORD,
-            .channel = 0,
-            .authmode = WIFI_AUTH_WPA2_PSK,
-            .ssid_hidden = 0,
-            .max_connection = 4,
-            .beacon_interval = 100
+            .threshold.authmode = WIFI_AUTH_WPA2_PSK,
           }
         };
    
-   printf("WiFi AP config: SSID=%s, AuthMode=WPA2_PSK, MaxConnections=4\n", SSID);
+   printf("WiFi STA config: connecting to SSID=%s\n", SSID);
  
    printf("WiFi config set\n");
-   ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
+   ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta_config));
  
    printf("WiFi start\n");
    ESP_ERROR_CHECK(esp_wifi_start());
 
-   esp_netif_ip_info_t ip_info;
-   esp_netif_get_ip_info(ap_netif, &ip_info);
-   ESP_LOGI(TAG, "AP IP address: "IPSTR" (DHCP server enabled)", IP2STR(&ip_info.ip));
-   
    printf("App main loop starting - Ready to test buttons!\n");
 
   while (1)
