@@ -1,5 +1,5 @@
 # Edit following two lines to set component requirements (see docs)
-set(COMPONENT_REQUIRES esp_driver_spi esp_driver_gpio esp_psram esp_wifi)
+set(COMPONENT_REQUIRES esp_driver_spi esp_driver_gpio esp_psram esp_wifi esp_netif esp_event nvs_flash)
 set(COMPONENT_PRIV_REQUIRES )
 
 set(COMPONENT_SRCS
