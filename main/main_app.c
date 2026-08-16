@@ -5,24 +5,12 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
-#include "console/console.h"
-//#include "console/console.c"
-#include "ili9341/fonts/font.h"
-#include "ili9341/fonts/f16f.h"
-#include "ili9341/fonts/f24f.h"
-#include "ili9341/fonts/f32f.h"
-#include "ili9341/fonts/f6x8m.h"
 #include "esp_log.h"
 #include "esp_system.h"
-
-//#include "ili9341/fonts/font.c"
-#include "esp_system.h"
-#include "esp_spi_flash.h"
 #include "esp_psram.h"
-#include "ili9341/ili9341.h"
-//#include "ili9341/ili9341.c"
 #include "esp32/himem.h"
 #include "esp_wifi.h"
+#include "display.h"
 
 #define SSID "ESP32AP"
 
@@ -72,13 +60,33 @@ uint8_t CurLedCurrent = 7;	//24
 #define MODE_MA	7
 uint8_t CurrentMode = 0;
 
+// Button press counters and timestamps
+static uint32_t button1_count = 0;
+static uint32_t button2_count = 0;
+static uint32_t button3_count = 0;
+static uint32_t button1_last_time = 0;
+static uint32_t button2_last_time = 0;
+static uint32_t button3_last_time = 0;
+
+/**
+ * Get current timestamp in milliseconds since boot
+ */
+static uint32_t get_timestamp_ms(void)
+{
+    return (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+}
 
 void buttons_init()
 {
+	// Configure button pins as inputs
+	// Note: GPIO 39 and 37 are ADC-only pins with input-only pads (no internal pull-ups)
+	// Use external pull-up resistors or rely on board design
 	gpio_set_direction(PIN_BUTTON1, GPIO_MODE_INPUT);
-	gpio_pullup_en(PIN_BUTTON1);
+	// gpio_pullup_en(PIN_BUTTON1);  // Not supported on ADC pins
+	
 	gpio_set_direction(PIN_BUTTON2, GPIO_MODE_INPUT);
-	gpio_pullup_en(PIN_BUTTON2);
+	// gpio_pullup_en(PIN_BUTTON2);  // Not supported on ADC pins
+	
 	gpio_set_direction(PIN_BUTTON3, GPIO_MODE_INPUT);
 	gpio_pullup_en(PIN_BUTTON3);
 }
@@ -95,6 +103,7 @@ void monitoring_task(void *pvParameter)
 void fetchButtontask(void * params)
 {
   struct sButtonStates ButtonStates;
+  char display_text[20];
   memset(&ButtonStates, 1, sizeof(ButtonStates));  // Initialize to 1 (not pressed)
   
   while (true)
@@ -106,25 +115,34 @@ void fetchButtontask(void * params)
     // Detect button1 press (falling edge: 1 -> 0)
     if (ButtonStates.button1_old && !ButtonStates.button1)
     {
-      ESP_LOGI("BUTTON", "Button 1 PRESSED!");
-      ili9341_FillRect(20, 100, 100, 30, YELLOW);
-      ili9341_TextOutput(30, 110, 0, BLACK, "Button 1");
+      button1_count++;
+      button1_last_time = get_timestamp_ms();
+      ESP_LOGI("BUTTON", "Button 1 PRESSED! Count: %lu, Time: %lums", button1_count, button1_last_time);
+      display_fill_rect(20, 100, 80, 40, COLOR_YELLOW);
+      snprintf(display_text, sizeof(display_text), "B1:%lu", button1_count);
+      display_draw_text(25, 108, display_text, COLOR_BLACK, COLOR_YELLOW, 1);
     }
 
     // Detect button2 press (falling edge: 1 -> 0)
     if (ButtonStates.button2_old && !ButtonStates.button2)
     {
-      ESP_LOGI("BUTTON", "Button 2 PRESSED!");
-      ili9341_FillRect(150, 100, 100, 30, CYAN);
-      ili9341_TextOutput(160, 110, 0, BLACK, "Button 2");
+      button2_count++;
+      button2_last_time = get_timestamp_ms();
+      ESP_LOGI("BUTTON", "Button 2 PRESSED! Count: %lu, Time: %lums", button2_count, button2_last_time);
+      display_fill_rect(140, 100, 80, 40, COLOR_CYAN);
+      snprintf(display_text, sizeof(display_text), "B2:%lu", button2_count);
+      display_draw_text(150, 108, display_text, COLOR_BLACK, COLOR_CYAN, 1);
     }
 
     // Detect button3 press (falling edge: 1 -> 0)
     if (ButtonStates.button3_old && !ButtonStates.button3)
     {
-      ESP_LOGI("BUTTON", "Button 3 PRESSED!");
-      ili9341_FillRect(280, 100, 100, 30, MAGENTA);
-      ili9341_TextOutput(290, 110, 0, BLACK, "Button 3");
+      button3_count++;
+      button3_last_time = get_timestamp_ms();
+      ESP_LOGI("BUTTON", "Button 3 PRESSED! Count: %lu, Time: %lums", button3_count, button3_last_time);
+      display_fill_rect(260, 100, 80, 40, COLOR_MAGENTA);
+      snprintf(display_text, sizeof(display_text), "B3:%lu", button3_count);
+      display_draw_text(270, 108, display_text, COLOR_BLACK, COLOR_MAGENTA, 1);
     }
 
     // Update old states for next iteration
@@ -141,34 +159,40 @@ void fetchButtontask(void * params)
 
 void app_main()
 {
+   printf("App main started\n");
    buttons_init();
+   printf("Buttons initialized\n");
 
    printf("Display init\n");
-   ili9341_init(dispWidth, dispHeight);
-   ili9341_SetBL(100);
-   ili9341_FillScreen(BLACK);
-   ili9341_DrawPixel(100, 100, BLUE);
-   ili9341_DrawPixel(100, 200, YELLOW);
+   display_init();
+   printf("Display initialized successfully\n");
+   
+   display_fill_screen(COLOR_BLACK);
+   printf("Screen filled\n");
+   
+   display_draw_pixel(100, 100, COLOR_BLUE);
+   display_draw_pixel(100, 200, COLOR_YELLOW);
+   printf("Pixels drawn\n");
 
-   ili9341_TextOutput(20, 20, 0, RED, "Hello world!!!");
-   ili9341_DrawCircle(100, 100, 60, GREEN);
-
-//   xTaskCreatePinnedToCore(&fetchButtontask, "button fetching", 2048, "task 1", 2, NULL,2);
+   printf("Button task creating\n");
    xTaskCreate(&fetchButtontask, "button fetching", 2048, "task 1", 2, NULL);
-//   xTaskCreate(&fetchButtontask, "button fetching", 2048, NULL, tskIDLE_PRIORITY, NULL);
   
+   printf("Monitoring task creating\n");
    xTaskCreatePinnedToCore(&monitoring_task, "monitoring_task", 2048, NULL, 1, NULL, 1);
 
-
-    wifi_init_config_t wifiInitializationConfig = WIFI_INIT_CONFIG_DEFAULT();
+   printf("WiFi init\n");
+   wifi_init_config_t wifiInitializationConfig = WIFI_INIT_CONFIG_DEFAULT();
  
-    esp_wifi_init(&wifiInitializationConfig);
+   printf("WiFi init config done\n");
+   esp_wifi_init(&wifiInitializationConfig);
  
-    esp_wifi_set_storage(WIFI_STORAGE_RAM);
+   printf("WiFi storage\n");
+   esp_wifi_set_storage(WIFI_STORAGE_RAM);
  
-    esp_wifi_set_mode(WIFI_MODE_AP);
+   printf("WiFi mode\n");
+   esp_wifi_set_mode(WIFI_MODE_AP);
  
-    wifi_config_t ap_config = {
+   wifi_config_t ap_config = {
           .ap = {
             .ssid = SSID,
             .channel = 0,
@@ -179,11 +203,16 @@ void app_main()
           }
         };
  
-    esp_wifi_set_config(WIFI_IF_AP, &ap_config);
+   printf("WiFi config set\n");
+   esp_wifi_set_config(WIFI_IF_AP, &ap_config);
  
-    esp_wifi_start();
+   printf("WiFi start\n");
+   esp_wifi_start();
+   
+   printf("App main loop starting - Ready to test buttons!\n");
 
   while (1)
   {
+    vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }

@@ -1,20 +1,14 @@
 # Edit following two lines to set component requirements (see docs)
-set(COMPONENT_REQUIRES )
+set(COMPONENT_REQUIRES esp_driver_spi esp_driver_gpio esp_psram esp_wifi)
 set(COMPONENT_PRIV_REQUIRES )
 
 set(COMPONENT_SRCS
 "main_app.c"
-"ili9341/ili9341.c"
-"ili9341/fonts/font.c"
-"ili9341/fonts/f16f.c"
-"ili9341/fonts/f24f.c"
-"ili9341/fonts/f32f.c"
-"ili9341/fonts/f6x8m.c"
+"display.c"
 "console/console.c"
-#"wifi/wifi_manager.c"
 )
 
-set(COMPONENT_ADD_INCLUDEDIRS "." "console" "ili9341" "ili9341/fonts")
+set(COMPONENT_ADD_INCLUDEDIRS "." "console")
 #set(COMPONENT_ADD_INCLUDEDIRS "console" "display" "display/fonts" "ili9341")
 
 

@@ -321,8 +321,18 @@ void ili9341_init(uint16_t width, uint16_t height)
   //Initialize the LCD
   lcd_init();
 
-  ScreenBuff = heap_caps_malloc(ILI9341_TFTHEIGHT * ILI9341_TFTWIDTH * 2, MALLOC_CAP_8BIT | MALLOC_CAP_DMA);
+#if (ILI9341_MODE == ILI9341_BUFFER_MODE)
+  ScreenBuff = heap_caps_malloc(ILI9341_TFTHEIGHT * ILI9341_TFTWIDTH * 2, MALLOC_CAP_SPIRAM);
+  if (ScreenBuff == NULL)
+  {
+    printf("ERROR: Failed to allocate screen buffer from PSRAM\n");
+    ScreenBuff = heap_caps_malloc(ILI9341_TFTHEIGHT * ILI9341_TFTWIDTH * 2, MALLOC_CAP_8BIT);
+  }
   printf("*ScreenBuff=0x%08lx\n", (unsigned long) ScreenBuff);
+#else
+  ScreenBuff = NULL;
+  printf("DIRECT_MODE: No buffer allocated\n");
+#endif
 
   ili9341_setRotation(1);
 }
@@ -364,12 +374,17 @@ void ili9341_FillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color
 
 	SwapBytes(&color);
 
-	uint16_t *Buff = &ScreenBuff[y * _width + x];
-	for (uint32_t i = 0; i < h * w; i++)
-		Buff[i] = color;
+	// In DIRECT_MODE, fill row by row
+	uint16_t rowBuff[ILI9341_TFTWIDTH];
+	for (uint16_t i = 0; i < w; i++)
+		rowBuff[i] = color;
 
 	ili9341_setWindow(x, y, x + w - 1, y + h - 1);
-	lcd_data((uint8_t *) Buff, w * h * 2);
+	
+	for (uint16_t row = 0; row < h; row++)
+	{
+		lcd_data((uint8_t *) rowBuff, w * 2);
+	}
 }
 #endif
 
