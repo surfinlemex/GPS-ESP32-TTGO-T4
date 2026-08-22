@@ -20,6 +20,20 @@ Specifications:
     Battery cable included
     Dimensions PCB: 65.9x40.8mm
 
+## MGMT-UDP-Server connection
+
+The firmware sends a `STATUS` UDP request every 10 seconds after Wi-Fi connects
+and logs the server response. It resolves `hq-mmd-3.xelox.org` through DNS and
+uses UDP port `5000`.
+
+Start the server on the computer's LAN interface:
+
+```bash
+./build/MGMT-UDP-Server 5000
+```
+
+The expected response in the ESP32 log is `STATUS:UP`.
+
 ASCII for Fonts:
 
 ![image](https://user-images.githubusercontent.com/31878095/113403478-8b047700-93c8-11eb-945d-d2453c8c6a79.png)

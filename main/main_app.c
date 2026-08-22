@@ -2,7 +2,13 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <errno.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <sys/socket.h>
+#include <sys/time.h>
 #include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -18,6 +24,10 @@
 
 #define SSID "XeloX@MESH"      // Router SSID to connect to
 #define PASSWORD "P@1@nTiR"  // Router WPA2 password (min 8 chars)
+
+#define MGMT_SERVER_HOST "hq-mmd-3.xelox.org"
+#define MGMT_SERVER_PORT 5000
+#define MGMT_REQUEST "STATUS"
 
 #define WIFI_MAXIMUM_RETRY 5
 
@@ -99,12 +109,15 @@ void buttons_init()
 }
 
 static int wifi_retry_count = 0;
+static EventGroupHandle_t wifi_event_group;
+#define WIFI_CONNECTED_BIT BIT0
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
 	if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
 		esp_wifi_connect();
 	} else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+    xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
 		if (wifi_retry_count < WIFI_MAXIMUM_RETRY) {
 			esp_wifi_connect();
 			wifi_retry_count++;
@@ -116,7 +129,67 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
 		ip_event_got_ip_t *event = (ip_event_got_ip_t *) event_data;
 		wifi_retry_count = 0;
 		ESP_LOGI(TAG, "Got IP: "IPSTR, IP2STR(&event->ip_info.ip));
+    xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
 	}
+}
+
+static void management_udp_task(void *params)
+{
+  char response[128];
+
+  for (;;) {
+    xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
+
+    struct addrinfo hints = {
+      .ai_family = AF_INET,
+      .ai_socktype = SOCK_DGRAM,
+      .ai_protocol = IPPROTO_UDP,
+    };
+    struct addrinfo *server_info = NULL;
+    char port_string[6];
+    snprintf(port_string, sizeof(port_string), "%d", MGMT_SERVER_PORT);
+    int resolve_result = getaddrinfo(MGMT_SERVER_HOST, port_string, &hints, &server_info);
+    if (resolve_result != 0 || server_info == NULL) {
+      ESP_LOGW(TAG, "Unable to resolve management server %s: error %d",
+        MGMT_SERVER_HOST, resolve_result);
+      vTaskDelay(pdMS_TO_TICKS(5000));
+      continue;
+    }
+
+    int socket_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (socket_fd < 0) {
+      ESP_LOGE(TAG, "Unable to create UDP socket: errno %d", errno);
+      freeaddrinfo(server_info);
+      vTaskDelay(pdMS_TO_TICKS(5000));
+      continue;
+    }
+
+    struct timeval receive_timeout = {
+      .tv_sec = 2,
+      .tv_usec = 0,
+    };
+    setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &receive_timeout, sizeof(receive_timeout));
+
+    ssize_t sent = sendto(socket_fd, MGMT_REQUEST, strlen(MGMT_REQUEST), 0,
+      server_info->ai_addr, server_info->ai_addrlen);
+    if (sent < 0) {
+      ESP_LOGE(TAG, "UDP send failed: errno %d", errno);
+    } else {
+      ssize_t received = recvfrom(socket_fd, response, sizeof(response) - 1, 0, NULL, NULL);
+      if (received < 0) {
+        ESP_LOGW(TAG, "No UDP response from %s:%d: errno %d",
+          MGMT_SERVER_HOST, MGMT_SERVER_PORT, errno);
+      } else {
+        response[received] = '\0';
+        ESP_LOGI(TAG, "Management server response: %s", response);
+      }
+    }
+
+    shutdown(socket_fd, SHUT_RDWR);
+    close(socket_fd);
+  freeaddrinfo(server_info);
+    vTaskDelay(pdMS_TO_TICKS(10000));
+  }
 }
 
 void monitoring_task(void *pvParameter)
@@ -189,6 +262,11 @@ void fetchButtontask(void * params)
 void app_main()
 {
    printf("App main started\n");
+  wifi_event_group = xEventGroupCreate();
+  if (wifi_event_group == NULL) {
+    ESP_LOGE(TAG, "Failed to create Wi-Fi event group");
+    return;
+  }
    buttons_init();
    printf("Buttons initialized\n");
 
@@ -249,6 +327,8 @@ void app_main()
  
    printf("WiFi start\n");
    ESP_ERROR_CHECK(esp_wifi_start());
+
+  xTaskCreate(&management_udp_task, "management_udp", 4096, NULL, 4, NULL);
 
    printf("App main loop starting - Ready to test buttons!\n");
 
