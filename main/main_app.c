@@ -9,6 +9,7 @@
 #include <sys/time.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/queue.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -28,6 +29,7 @@
 #define MGMT_SERVER_HOST "hq-mmd-3.xelox.org"
 #define MGMT_SERVER_PORT 5000
 #define MGMT_REQUEST "STATUS"
+#define MGMT_EVENT_MAX_LENGTH 32
 
 #define WIFI_MAXIMUM_RETRY 5
 
@@ -110,6 +112,7 @@ void buttons_init()
 
 static int wifi_retry_count = 0;
 static EventGroupHandle_t wifi_event_group;
+static QueueHandle_t management_event_queue;
 #define WIFI_CONNECTED_BIT BIT0
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
@@ -136,9 +139,14 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
 static void management_udp_task(void *params)
 {
   char response[128];
+  char message[MGMT_EVENT_MAX_LENGTH];
 
   for (;;) {
     xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
+
+    TickType_t wait_time = pdMS_TO_TICKS(10000);
+    bool has_event = xQueueReceive(management_event_queue, message, wait_time) == pdTRUE;
+    const char *request = has_event ? message : MGMT_REQUEST;
 
     struct addrinfo hints = {
       .ai_family = AF_INET,
@@ -170,7 +178,7 @@ static void management_udp_task(void *params)
     };
     setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &receive_timeout, sizeof(receive_timeout));
 
-    ssize_t sent = sendto(socket_fd, MGMT_REQUEST, strlen(MGMT_REQUEST), 0,
+    ssize_t sent = sendto(socket_fd, request, strlen(request), 0,
       server_info->ai_addr, server_info->ai_addrlen);
     if (sent < 0) {
       ESP_LOGE(TAG, "UDP send failed: errno %d", errno);
@@ -181,14 +189,25 @@ static void management_udp_task(void *params)
           MGMT_SERVER_HOST, MGMT_SERVER_PORT, errno);
       } else {
         response[received] = '\0';
-        ESP_LOGI(TAG, "Management server response: %s", response);
+        ESP_LOGI(TAG, "Management server response to %s: %s", request, response);
       }
     }
 
     shutdown(socket_fd, SHUT_RDWR);
     close(socket_fd);
-  freeaddrinfo(server_info);
-    vTaskDelay(pdMS_TO_TICKS(10000));
+    freeaddrinfo(server_info);
+    if (!has_event) {
+      vTaskDelay(pdMS_TO_TICKS(10000));
+    }
+  }
+}
+
+static void queue_button_event(const char *event)
+{
+  char queued_event[MGMT_EVENT_MAX_LENGTH] = {0};
+  strncpy(queued_event, event, sizeof(queued_event) - 1);
+  if (xQueueSend(management_event_queue, queued_event, 0) != pdTRUE) {
+    ESP_LOGW(TAG, "Management event queue full, dropping %s", event);
   }
 }
 
@@ -223,6 +242,7 @@ void fetchButtontask(void * params)
       display_fill_rect(20, 100, 80, 40, COLOR_YELLOW);
       snprintf(display_text, sizeof(display_text), "B1:%lu", button1_count);
       display_draw_text(25, 108, display_text, COLOR_BLACK, COLOR_YELLOW, 1);
+      queue_button_event("BUTTON1_PRESSED");
     }
 
     // Detect button2 press (falling edge: 1 -> 0)
@@ -234,6 +254,7 @@ void fetchButtontask(void * params)
       display_fill_rect(140, 100, 80, 40, COLOR_CYAN);
       snprintf(display_text, sizeof(display_text), "B2:%lu", button2_count);
       display_draw_text(150, 108, display_text, COLOR_BLACK, COLOR_CYAN, 1);
+      queue_button_event("BUTTON2_PRESSED");
     }
 
     // Detect button3 press (falling edge: 1 -> 0)
@@ -245,6 +266,7 @@ void fetchButtontask(void * params)
       display_fill_rect(260, 100, 80, 40, COLOR_MAGENTA);
       snprintf(display_text, sizeof(display_text), "B3:%lu", button3_count);
       display_draw_text(270, 108, display_text, COLOR_BLACK, COLOR_MAGENTA, 1);
+      queue_button_event("BUTTON3_PRESSED");
     }
 
     // Update old states for next iteration
@@ -267,6 +289,11 @@ void app_main()
     ESP_LOGE(TAG, "Failed to create Wi-Fi event group");
     return;
   }
+   management_event_queue = xQueueCreate(8, MGMT_EVENT_MAX_LENGTH);
+   if (management_event_queue == NULL) {
+     ESP_LOGE(TAG, "Failed to create management event queue");
+     return;
+   }
    buttons_init();
    printf("Buttons initialized\n");
 

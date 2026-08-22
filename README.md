@@ -23,8 +23,10 @@ Specifications:
 ## MGMT-UDP-Server connection
 
 The firmware sends a `STATUS` UDP request every 10 seconds after Wi-Fi connects
-and logs the server response. It resolves `hq-mmd-3.xelox.org` through DNS and
-uses UDP port `5000`.
+and logs the server response. Button presses are sent as `BUTTON1_PRESSED`,
+`BUTTON2_PRESSED`, or `BUTTON3_PRESSED`, and the server acknowledges them as
+`ACK:<event>`. It resolves `hq-mmd-3.xelox.org` through DNS and uses UDP port
+`5000`.
 
 Start the server on the computer's LAN interface:
 
