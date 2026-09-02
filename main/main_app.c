@@ -10,6 +10,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -33,6 +34,12 @@
 #define MGMT_CLIENT_MAC_LENGTH 18
 #define MGMT_CLIENT_NAME_LENGTH 20
 #define MGMT_FULL_MESSAGE_LENGTH 96
+
+// Area reserved for showing the server's last message and timestamp.
+#define MGMT_DISPLAY_X 0
+#define MGMT_DISPLAY_Y 200
+#define MGMT_DISPLAY_W dispWidth
+#define MGMT_DISPLAY_H 40
 
 #define WIFI_MAXIMUM_RETRY 5
 
@@ -116,6 +123,7 @@ void buttons_init()
 static int wifi_retry_count = 0;
 static EventGroupHandle_t wifi_event_group;
 static QueueHandle_t management_event_queue;
+static SemaphoreHandle_t display_mutex;
 #define WIFI_CONNECTED_BIT BIT0
 
 // Derived once from the STA MAC address so the server can identify this device.
@@ -154,6 +162,29 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
 		ESP_LOGI(TAG, "Got IP: "IPSTR, IP2STR(&event->ip_info.ip));
     xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
 	}
+}
+
+// Splits "message@timestamp" from the server and shows both on screen.
+static void show_server_message(const char *response)
+{
+  char message[96];
+  char timestamp[32] = {0};
+  strncpy(message, response, sizeof(message) - 1);
+  message[sizeof(message) - 1] = '\0';
+
+  char *separator = strchr(message, '@');
+  if (separator != NULL) {
+    *separator = '\0';
+    strncpy(timestamp, separator + 1, sizeof(timestamp) - 1);
+  }
+
+  xSemaphoreTake(display_mutex, portMAX_DELAY);
+  display_fill_rect(MGMT_DISPLAY_X, MGMT_DISPLAY_Y, MGMT_DISPLAY_W, MGMT_DISPLAY_H, COLOR_BLACK);
+  display_draw_text(MGMT_DISPLAY_X + 4, MGMT_DISPLAY_Y + 4, message, COLOR_WHITE, COLOR_BLACK, 1);
+  if (timestamp[0] != '\0') {
+    display_draw_text(MGMT_DISPLAY_X + 4, MGMT_DISPLAY_Y + 20, timestamp, COLOR_GREEN, COLOR_BLACK, 1);
+  }
+  xSemaphoreGive(display_mutex);
 }
 
 static void management_udp_task(void *params)
@@ -213,6 +244,7 @@ static void management_udp_task(void *params)
       } else {
         response[received] = '\0';
         ESP_LOGI(TAG, "Management server response to %s: %s", request, response);
+        show_server_message(response);
       }
     }
 
@@ -262,9 +294,11 @@ void fetchButtontask(void * params)
       button1_count++;
       button1_last_time = get_timestamp_ms();
       ESP_LOGI("BUTTON", "Button 1 PRESSED! Count: %lu, Time: %lums", button1_count, button1_last_time);
+      xSemaphoreTake(display_mutex, portMAX_DELAY);
       display_fill_rect(20, 100, 80, 40, COLOR_YELLOW);
       snprintf(display_text, sizeof(display_text), "B1:%lu", button1_count);
       display_draw_text(25, 108, display_text, COLOR_BLACK, COLOR_YELLOW, 1);
+      xSemaphoreGive(display_mutex);
       queue_button_event("BUTTON1_PRESSED");
     }
 
@@ -274,9 +308,11 @@ void fetchButtontask(void * params)
       button2_count++;
       button2_last_time = get_timestamp_ms();
       ESP_LOGI("BUTTON", "Button 2 PRESSED! Count: %lu, Time: %lums", button2_count, button2_last_time);
+      xSemaphoreTake(display_mutex, portMAX_DELAY);
       display_fill_rect(140, 100, 80, 40, COLOR_CYAN);
       snprintf(display_text, sizeof(display_text), "B2:%lu", button2_count);
       display_draw_text(150, 108, display_text, COLOR_BLACK, COLOR_CYAN, 1);
+      xSemaphoreGive(display_mutex);
       queue_button_event("BUTTON2_PRESSED");
     }
 
@@ -286,9 +322,11 @@ void fetchButtontask(void * params)
       button3_count++;
       button3_last_time = get_timestamp_ms();
       ESP_LOGI("BUTTON", "Button 3 PRESSED! Count: %lu, Time: %lums", button3_count, button3_last_time);
+      xSemaphoreTake(display_mutex, portMAX_DELAY);
       display_fill_rect(260, 100, 80, 40, COLOR_MAGENTA);
       snprintf(display_text, sizeof(display_text), "B3:%lu", button3_count);
       display_draw_text(270, 108, display_text, COLOR_BLACK, COLOR_MAGENTA, 1);
+      xSemaphoreGive(display_mutex);
       queue_button_event("BUTTON3_PRESSED");
     }
 
@@ -315,6 +353,11 @@ void app_main()
    management_event_queue = xQueueCreate(8, MGMT_EVENT_MAX_LENGTH);
    if (management_event_queue == NULL) {
      ESP_LOGE(TAG, "Failed to create management event queue");
+     return;
+   }
+   display_mutex = xSemaphoreCreateMutex();
+   if (display_mutex == NULL) {
+     ESP_LOGE(TAG, "Failed to create display mutex");
      return;
    }
    buttons_init();
