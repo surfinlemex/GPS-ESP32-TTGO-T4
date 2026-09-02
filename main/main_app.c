@@ -30,6 +30,9 @@
 #define MGMT_SERVER_PORT 5000
 #define MGMT_REQUEST "STATUS"
 #define MGMT_EVENT_MAX_LENGTH 32
+#define MGMT_CLIENT_MAC_LENGTH 18
+#define MGMT_CLIENT_NAME_LENGTH 20
+#define MGMT_FULL_MESSAGE_LENGTH 96
 
 #define WIFI_MAXIMUM_RETRY 5
 
@@ -115,6 +118,23 @@ static EventGroupHandle_t wifi_event_group;
 static QueueHandle_t management_event_queue;
 #define WIFI_CONNECTED_BIT BIT0
 
+// Derived once from the STA MAC address so the server can identify this device.
+static char g_client_mac[MGMT_CLIENT_MAC_LENGTH] = {0};
+static char g_client_name[MGMT_CLIENT_NAME_LENGTH] = {0};
+
+static void init_client_identity(void)
+{
+  uint8_t mac[6] = {0};
+  esp_err_t err = esp_wifi_get_mac(WIFI_IF_STA, mac);
+  if (err != ESP_OK) {
+    ESP_LOGW(TAG, "Failed to read STA MAC address: %d", err);
+  }
+  snprintf(g_client_mac, sizeof(g_client_mac), "%02X:%02X:%02X:%02X:%02X:%02X",
+    mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  snprintf(g_client_name, sizeof(g_client_name), "ESP32-%02X%02X%02X", mac[3], mac[4], mac[5]);
+  ESP_LOGI(TAG, "Client identity: %s (%s)", g_client_name, g_client_mac);
+}
+
 static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
 	if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
@@ -148,6 +168,9 @@ static void management_udp_task(void *params)
     bool has_event = xQueueReceive(management_event_queue, message, wait_time) == pdTRUE;
     const char *request = has_event ? message : MGMT_REQUEST;
 
+    char full_request[MGMT_FULL_MESSAGE_LENGTH];
+    snprintf(full_request, sizeof(full_request), "%s|%s|%s", g_client_mac, g_client_name, request);
+
     struct addrinfo hints = {
       .ai_family = AF_INET,
       .ai_socktype = SOCK_DGRAM,
@@ -178,7 +201,7 @@ static void management_udp_task(void *params)
     };
     setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &receive_timeout, sizeof(receive_timeout));
 
-    ssize_t sent = sendto(socket_fd, request, strlen(request), 0,
+    ssize_t sent = sendto(socket_fd, full_request, strlen(full_request), 0,
       server_info->ai_addr, server_info->ai_addrlen);
     if (sent < 0) {
       ESP_LOGE(TAG, "UDP send failed: errno %d", errno);
@@ -355,6 +378,7 @@ void app_main()
    printf("WiFi start\n");
    ESP_ERROR_CHECK(esp_wifi_start());
 
+  init_client_identity();
   xTaskCreate(&management_udp_task, "management_udp", 4096, NULL, 4, NULL);
 
    printf("App main loop starting - Ready to test buttons!\n");
