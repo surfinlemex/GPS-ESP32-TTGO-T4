@@ -203,6 +203,14 @@ esp_lcd_panel_handle_t display_init(void)
 }
 
 /**
+ * Turn the LCD backlight on or off without affecting the drawn contents
+ */
+void display_set_backlight(bool on)
+{
+    gpio_set_level(PIN_BL, on ? 1 : 0);
+}
+
+/**
  * Draw a filled rectangle on the display
  */
 void display_fill_rect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color)

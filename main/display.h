@@ -1,6 +1,7 @@
 #ifndef DISPLAY_H_
 #define DISPLAY_H_
 
+#include <stdbool.h>
 #include <stdint.h>
 
 // Color definitions
@@ -58,5 +59,10 @@ void display_draw_text(int16_t x, int16_t y, const char *text, uint16_t color, u
  * Get panel handle for direct access if needed
  */
 esp_lcd_panel_handle_t display_get_panel(void);
+
+/**
+ * Turn the LCD backlight on or off without affecting the drawn contents
+ */
+void display_set_backlight(bool on);
 
 #endif // DISPLAY_H_

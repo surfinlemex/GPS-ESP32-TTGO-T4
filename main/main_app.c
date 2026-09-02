@@ -97,12 +97,39 @@ static uint32_t button1_last_time = 0;
 static uint32_t button2_last_time = 0;
 static uint32_t button3_last_time = 0;
 
+#define BACKLIGHT_TIMEOUT_MS 60000
+static volatile uint32_t last_activity_ms = 0;
+static volatile bool backlight_on = true;
+
 /**
  * Get current timestamp in milliseconds since boot
  */
 static uint32_t get_timestamp_ms(void)
 {
     return (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+}
+
+// Resets the inactivity timer and wakes the backlight if it was off.
+static void note_activity(void)
+{
+  last_activity_ms = get_timestamp_ms();
+  if (!backlight_on) {
+    display_set_backlight(true);
+    backlight_on = true;
+    ESP_LOGI(TAG, "Backlight ON (button press)");
+  }
+}
+
+void backlight_task(void *pvParameter)
+{
+  for (;;) {
+    if (backlight_on && (get_timestamp_ms() - last_activity_ms) >= BACKLIGHT_TIMEOUT_MS) {
+      display_set_backlight(false);
+      backlight_on = false;
+      ESP_LOGI(TAG, "Backlight OFF (idle %d ms)", BACKLIGHT_TIMEOUT_MS);
+    }
+    vTaskDelay(pdMS_TO_TICKS(1000));
+  }
 }
 
 void buttons_init()
@@ -294,6 +321,7 @@ void fetchButtontask(void * params)
       button1_count++;
       button1_last_time = get_timestamp_ms();
       ESP_LOGI("BUTTON", "Button 1 PRESSED! Count: %lu, Time: %lums", button1_count, button1_last_time);
+      note_activity();
       xSemaphoreTake(display_mutex, portMAX_DELAY);
       display_fill_rect(20, 100, 80, 40, COLOR_YELLOW);
       snprintf(display_text, sizeof(display_text), "B1:%lu", button1_count);
@@ -308,6 +336,7 @@ void fetchButtontask(void * params)
       button2_count++;
       button2_last_time = get_timestamp_ms();
       ESP_LOGI("BUTTON", "Button 2 PRESSED! Count: %lu, Time: %lums", button2_count, button2_last_time);
+      note_activity();
       xSemaphoreTake(display_mutex, portMAX_DELAY);
       display_fill_rect(140, 100, 80, 40, COLOR_CYAN);
       snprintf(display_text, sizeof(display_text), "B2:%lu", button2_count);
@@ -322,6 +351,7 @@ void fetchButtontask(void * params)
       button3_count++;
       button3_last_time = get_timestamp_ms();
       ESP_LOGI("BUTTON", "Button 3 PRESSED! Count: %lu, Time: %lums", button3_count, button3_last_time);
+      note_activity();
       xSemaphoreTake(display_mutex, portMAX_DELAY);
       display_fill_rect(260, 100, 80, 40, COLOR_MAGENTA);
       snprintf(display_text, sizeof(display_text), "B3:%lu", button3_count);
@@ -366,6 +396,7 @@ void app_main()
    printf("Display init\n");
    display_init();
    printf("Display initialized successfully\n");
+   last_activity_ms = get_timestamp_ms();
    
    display_fill_screen(COLOR_BLACK);
    printf("Screen filled\n");
@@ -376,6 +407,9 @@ void app_main()
 
    printf("Button task creating\n");
    xTaskCreate(&fetchButtontask, "button fetching", 2048, "task 1", 2, NULL);
+
+   printf("Backlight task creating\n");
+   xTaskCreate(&backlight_task, "backlight", 2048, NULL, 1, NULL);
   
    printf("Monitoring task creating\n");
    xTaskCreatePinnedToCore(&monitoring_task, "monitoring_task", 2048, NULL, 1, NULL, 1);
